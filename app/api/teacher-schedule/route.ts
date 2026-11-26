@@ -1,6 +1,7 @@
 import { denyUnlessAdmin } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { positiveInt, scheduleInclude, scheduleOrder } from "../schedules/data";
 
 export const dynamic = "force-dynamic";
 
@@ -9,21 +10,16 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
-  const teacherId = searchParams.get("teacherId");
+  const teacherId = positiveInt(searchParams.get("teacherId"));
 
   if (!teacherId) {
-    return NextResponse.json({ error: "ต้องระบุ teacherId" }, { status: 400 });
+    return NextResponse.json({ error: "รหัสครูไม่ถูกต้อง" }, { status: 400 });
   }
 
   const schedules = await prisma.schedule.findMany({
-    where: { teacherId: Number(teacherId) },
-    include: {
-      subject: true,
-      room: true,
-      period: true,
-      classGroup: true,
-    },
-    orderBy: [{ dayOfWeek: "asc" }, { period: { periodNo: "asc" } }],
+    where: { teacherId },
+    include: scheduleInclude,
+    orderBy: scheduleOrder,
   });
 
   // สรุปจำนวนคาบสอนต่อวัน

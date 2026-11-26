@@ -8,10 +8,14 @@ interface TeacherSchedule {
   subject: { name: string };
   room: { name: string };
   classGroup: { name: string };
+  groups?: { classGroup: { name: string } }[];
   period: { id: number; periodNo: number };
 }
 
 const DAYS = ["จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์"];
+function groupLabel(schedule: TeacherSchedule) {
+  return [...new Set([schedule.classGroup.name, ...(schedule.groups ?? []).map(group => group.classGroup.name)])].join(", ");
+}
 const COLORS = [
   "bg-indigo-50 text-indigo-800 border-indigo-100",
   "bg-emerald-50 text-emerald-800 border-emerald-100",
@@ -148,7 +152,7 @@ export default function TeacherSchedulePage() {
                             return cell ? (
                               <div className={`rounded-lg px-1.5 py-2 border text-center ${classColorMap[cell.classGroup.name]}`}>
                                 <div className="font-medium leading-tight">{cell.subject.name}</div>
-                                <div className="text-[10px] opacity-75 mt-0.5">{cell.classGroup.name}</div>
+                                <div className="text-[10px] opacity-75 mt-0.5">{groupLabel(cell)}</div>
                                 <div className="text-[10px] opacity-60">{cell.room.name}</div>
                               </div>
                             ) : (
