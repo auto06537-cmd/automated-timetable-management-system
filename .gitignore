@@ -1,0 +1,41 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+# Logs
+*.log
+logs/
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.tmp
+
+# Build output
+out/
+dist/
+build/
+coverage/
+
+# Local database backups
+*.dump
+*.sql.bak
+
+# Credentials and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS files
+.DS_Store
+Thumbs.dbSECURITY-REVIEW-3.2.2.md
+SECURITY-REVIEW-3.2.2.md

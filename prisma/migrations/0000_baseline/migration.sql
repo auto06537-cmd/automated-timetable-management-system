@@ -1,0 +1,68 @@
+CREATE TABLE "Subject" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  "code" TEXT NOT NULL, "name" TEXT NOT NULL, "periodsPerWeek" INTEGER NOT NULL,
+  "isCommon" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE "Room" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  "name" TEXT NOT NULL, "capacity" INTEGER NOT NULL DEFAULT 40, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE "ClassGroup" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  "name" TEXT NOT NULL, "year" INTEGER NOT NULL DEFAULT 1, "pairKey" TEXT,
+  "maxEndPeriod" INTEGER, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE "Period" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  "periodNo" INTEGER NOT NULL, "startTime" TEXT NOT NULL, "endTime" TEXT NOT NULL,
+  "isLunch" BOOLEAN NOT NULL DEFAULT false
+);
+CREATE TABLE "Teacher" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  "code" TEXT NOT NULL, "name" TEXT NOT NULL, "maxPeriodsPerDay" INTEGER NOT NULL DEFAULT 4,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE "TeacherSubject" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "teacherId" INTEGER NOT NULL, "subjectId" INTEGER NOT NULL,
+  FOREIGN KEY ("teacherId") REFERENCES "Teacher" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY ("subjectId") REFERENCES "Subject" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE "TeacherBusy" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "teacherId" INTEGER NOT NULL,
+  "dayOfWeek" INTEGER NOT NULL, "periodId" INTEGER NOT NULL, "reason" TEXT,
+  FOREIGN KEY ("teacherId") REFERENCES "Teacher" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY ("periodId") REFERENCES "Period" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+CREATE TABLE "Schedule" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  "dayOfWeek" INTEGER NOT NULL, "isLocked" BOOLEAN NOT NULL DEFAULT false,
+  "classGroupId" INTEGER NOT NULL, "subjectId" INTEGER NOT NULL, "roomId" INTEGER NOT NULL,
+  "periodId" INTEGER NOT NULL, "teacherId" INTEGER, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY ("classGroupId") REFERENCES "ClassGroup" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  FOREIGN KEY ("subjectId") REFERENCES "Subject" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  FOREIGN KEY ("roomId") REFERENCES "Room" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  FOREIGN KEY ("periodId") REFERENCES "Period" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  FOREIGN KEY ("teacherId") REFERENCES "Teacher" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE TABLE "LockedSlot" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "dayOfWeek" INTEGER NOT NULL, "label" TEXT NOT NULL,
+  "classGroupId" INTEGER NOT NULL, "subjectId" INTEGER, "periodId" INTEGER NOT NULL,
+  FOREIGN KEY ("classGroupId") REFERENCES "ClassGroup" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  FOREIGN KEY ("subjectId") REFERENCES "Subject" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+  FOREIGN KEY ("periodId") REFERENCES "Period" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+CREATE TABLE "Admin" (
+  "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  "username" TEXT NOT NULL, "password" TEXT NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX "Subject_code_key" ON "Subject" ("code");
+CREATE UNIQUE INDEX "Room_name_key" ON "Room" ("name");
+CREATE UNIQUE INDEX "ClassGroup_name_key" ON "ClassGroup" ("name");
+CREATE UNIQUE INDEX "Period_periodNo_key" ON "Period" ("periodNo");
+CREATE UNIQUE INDEX "Teacher_code_key" ON "Teacher" ("code");
+CREATE UNIQUE INDEX "TeacherSubject_teacherId_subjectId_key" ON "TeacherSubject" ("teacherId", "subjectId");
+CREATE UNIQUE INDEX "TeacherBusy_teacherId_dayOfWeek_periodId_key" ON "TeacherBusy" ("teacherId", "dayOfWeek", "periodId");
+CREATE UNIQUE INDEX "Schedule_dayOfWeek_roomId_periodId_key" ON "Schedule" ("dayOfWeek", "roomId", "periodId");
+CREATE UNIQUE INDEX "Schedule_dayOfWeek_classGroupId_periodId_key" ON "Schedule" ("dayOfWeek", "classGroupId", "periodId");
+CREATE UNIQUE INDEX "LockedSlot_dayOfWeek_classGroupId_periodId_key" ON "LockedSlot" ("dayOfWeek", "classGroupId", "periodId");
+CREATE UNIQUE INDEX "Admin_username_key" ON "Admin" ("username");

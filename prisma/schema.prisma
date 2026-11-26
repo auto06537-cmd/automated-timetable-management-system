@@ -1,0 +1,156 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Subject {
+  id             Int              @id @default(autoincrement())
+  code           String           @unique
+  name           String
+  periodsPerWeek Int
+  isCommon       Boolean          @default(false) // true = วิชาสามัญ (เรียนรวม), false = วิชาแผนก (เรียนแยก)
+  pairedMode     String?          // SHARED_ROOM or SEPARATE_ROOMS; null until explicitly selected
+  createdAt      DateTime         @default(now())
+  schedules      Schedule[]
+  lockedSlots    LockedSlot[]
+  teacherSubjects TeacherSubject[]
+}
+
+model Room {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  capacity  Int        @default(40)
+  createdAt DateTime   @default(now())
+  schedules Schedule[]
+}
+
+model ClassGroup {
+  id           Int          @id @default(autoincrement())
+  name         String       @unique
+  year         Int          @default(1)  // ชั้นปี เช่น 1, 2, 3
+  pairKey      String?                   // กลุ่มที่เรียนวิชาสามัญร่วมกัน เช่น "1A" คู่กัน
+  scheduleGroups ScheduleGroup[]
+  maxEndPeriod Int?
+  createdAt    DateTime     @default(now())
+  schedules    Schedule[]
+  lockedSlots  LockedSlot[]
+}
+
+model Period {
+  id           Int          @id @default(autoincrement())
+  periodNo     Int          @unique
+  startTime    String
+  endTime      String
+  isLunch      Boolean      @default(false)
+  schedules    Schedule[]
+  lockedSlots  LockedSlot[]
+  teacherBusy  TeacherBusy[]
+}
+
+// ========== ครู ==========
+model Teacher {
+  id              Int              @id @default(autoincrement())
+  code            String           @unique  // รหัสครู เช่น "T001"
+  name            String                    // ชื่อ-นามสกุล
+  maxPeriodsPerDay Int             @default(4) // สอนได้สูงสุดกี่คาบ/วัน
+  createdAt       DateTime         @default(now())
+  teacherSubjects TeacherSubject[] // วิชาที่ครูสอนได้
+  teacherBusy     TeacherBusy[]   // คาบที่ครูไม่ว่าง
+  schedules       Schedule[]
+}
+
+// ครูสอนวิชาไหนได้บ้าง (many-to-many)
+model TeacherSubject {
+  id        Int     @id @default(autoincrement())
+  teacherId Int
+  subjectId Int
+  teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, subjectId])
+}
+
+// คาบที่ครูไม่ว่าง
+model TeacherBusy {
+  id        Int     @id @default(autoincrement())
+  teacherId Int
+  dayOfWeek Int     // 1=จันทร์...5=ศุกร์
+  periodId  Int
+  reason    String? // เหตุผล เช่น "ประชุม"
+  teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  period    Period  @relation(fields: [periodId], references: [id])
+
+  @@unique([teacherId, dayOfWeek, periodId])
+}
+
+model Schedule {
+  id           Int        @id @default(autoincrement())
+  dayOfWeek    Int
+  isLocked     Boolean    @default(false)
+  classGroupId Int
+  subjectId    Int
+  roomId       Int
+  periodId     Int
+  teacherId    Int?       // ครูที่สอนคาบนี้ (optional ตอนนี้)
+  createdAt    DateTime   @default(now())
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id])
+  subject      Subject    @relation(fields: [subjectId], references: [id])
+  room         Room       @relation(fields: [roomId], references: [id])
+  period       Period     @relation(fields: [periodId], references: [id])
+  teacher      Teacher?   @relation(fields: [teacherId], references: [id])
+
+  groups       ScheduleGroup[]
+
+  @@unique([id, dayOfWeek, periodId])
+  @@unique([dayOfWeek, roomId, periodId])
+  @@unique([dayOfWeek, classGroupId, periodId])
+}
+
+model ScheduleGroup {
+  scheduleId   Int
+  classGroupId Int
+  dayOfWeek    Int
+  periodId     Int
+  schedule     Schedule   @relation(fields: [scheduleId, dayOfWeek, periodId], references: [id, dayOfWeek, periodId], onDelete: Cascade, onUpdate: Cascade)
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+
+  @@id([scheduleId, classGroupId])
+  @@unique([dayOfWeek, classGroupId, periodId])
+}
+
+model LockedSlot {
+  id           Int        @id @default(autoincrement())
+  dayOfWeek    Int
+  label        String
+  classGroupId Int
+  subjectId    Int?
+  periodId     Int
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id])
+  subject      Subject?   @relation(fields: [subjectId], references: [id])
+  period       Period     @relation(fields: [periodId], references: [id])
+
+  @@unique([dayOfWeek, classGroupId, periodId])
+}
+
+model Admin {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  sessions  AdminSession[]
+}
+
+model AdminSession {
+  tokenHash String   @id
+  adminId   Int
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([expiresAt])
+}
