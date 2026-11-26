@@ -1,6 +1,7 @@
 import { denyUnlessAdmin } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { positiveInt, scheduleInclude } from "../schedules/data";
 
 interface Issue {
   type: "error" | "warning";
@@ -15,21 +16,33 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
-  const classGroupId = searchParams.get("classGroupId");
+  const rawGroupId = searchParams.get("classGroupId");
+  const classGroupId = positiveInt(rawGroupId);
+  if (rawGroupId !== null && classGroupId === undefined) {
+    return NextResponse.json({ error: "รหัสกลุ่มเรียนไม่ถูกต้อง" }, { status: 400 });
+  }
 
   const issues: Issue[] = [];
 
-  const where = classGroupId ? { classGroupId: Number(classGroupId) } : {};
-
   const schedules = await prisma.schedule.findMany({
-    where,
-    include: { subject: true, room: true, period: true, classGroup: true, teacher: true },
+    include: { ...scheduleInclude, teacher: true },
   });
+  type Schedule = typeof schedules[number];
+  const belongsTo = (schedule: Schedule, id: number) =>
+    schedule.classGroupId === id || schedule.groups.some(group => group.classGroupId === id);
+  const hasSelectedGroup = (entries: Schedule[]) =>
+    classGroupId === undefined || entries.some(entry => belongsTo(entry, classGroupId));
+  const groupNames = (schedule: Schedule) =>
+    [...new Set([schedule.classGroup.name, ...schedule.groups.map(group => group.classGroup.name)])].join(", ");
 
   const subjects = await prisma.subject.findMany();
-  const classGroups = classGroupId
-    ? await prisma.classGroup.findMany({ where: { id: Number(classGroupId) } })
-    : await prisma.classGroup.findMany();
+  const allGroups = await prisma.classGroup.findMany({
+    orderBy: [{ year: "asc" }, { name: "asc" }, { id: "asc" }],
+  });
+  const classGroups = classGroupId === undefined ? allGroups : allGroups.filter(group => group.id === classGroupId);
+  if (classGroupId !== undefined && !classGroups.length) {
+    return NextResponse.json({ error: "ไม่พบกลุ่มเรียน" }, { status: 404 });
+  }
 
   // ========== 1. ตรวจห้องเรียนชนกัน ==========
   const roomSlotMap = new Map<string, typeof schedules[0][]>();
@@ -39,11 +52,11 @@ export async function GET(req: NextRequest) {
     roomSlotMap.get(key)!.push(s);
   }
   for (const [, entries] of roomSlotMap) {
-    if (entries.length > 1) {
+    if (entries.length > 1 && hasSelectedGroup(entries)) {
       issues.push({
         type: "error",
         message: `ห้องเรียน "${entries[0].room.name}" ถูกใช้ซ้ำ`,
-        detail: `วันที่ ${entries[0].dayOfWeek} คาบ ${entries[0].period.periodNo} — ห้อง ${entries.map(e => e.classGroup.name).join(", ")}`,
+        detail: `วันที่ ${entries[0].dayOfWeek} คาบ ${entries[0].period.periodNo} — ห้อง ${entries.map(groupNames).join(", ")}`,
       });
     }
   }
@@ -56,27 +69,29 @@ export async function GET(req: NextRequest) {
     teacherSlotMap.get(key)!.push(s);
   }
   for (const [, entries] of teacherSlotMap) {
-    if (entries.length > 1) {
+    if (entries.length > 1 && hasSelectedGroup(entries)) {
       issues.push({
         type: "error",
         message: `ครู "${entries[0].teacher?.name}" สอน 2 ห้องพร้อมกัน`,
-        detail: `วันที่ ${entries[0].dayOfWeek} คาบ ${entries[0].period.periodNo} — ${entries.map(e => e.classGroup.name).join(", ")}`,
+        detail: `วันที่ ${entries[0].dayOfWeek} คาบ ${entries[0].period.periodNo} — ${entries.map(groupNames).join(", ")}`,
       });
     }
   }
 
   // ========== 3. ตรวจคาบว่างติดกันเกิน 2 ==========
+  const periods = await prisma.period.findMany({
+    where: { isLunch: false }, orderBy: { periodNo: "asc" },
+  });
+  const lockedSlots = await prisma.lockedSlot.findMany({
+    where: { classGroupId: { in: classGroups.map(group => group.id) } },
+  });
   for (const group of classGroups) {
-    const groupSchedules = schedules.filter(s => s.classGroupId === group.id);
-    const periods = await prisma.period.findMany({
-      where: { isLunch: false }, orderBy: { periodNo: "asc" }
-    });
-    const lockedSlots = await prisma.lockedSlot.findMany({ where: { classGroupId: group.id } });
+    const groupSchedules = schedules.filter(s => belongsTo(s, group.id));
 
     for (let day = 1; day <= 5; day++) {
       const occupied = new Set<number>();
       groupSchedules.filter(s => s.dayOfWeek === day).forEach(s => occupied.add(s.periodId));
-      lockedSlots.filter(l => l.dayOfWeek === day).forEach(l => occupied.add(l.periodId));
+      lockedSlots.filter(l => l.classGroupId === group.id && l.dayOfWeek === day).forEach(l => occupied.add(l.periodId));
 
       let maxGap = 0, curGap = 0, started = false;
       for (const p of periods) {
@@ -96,7 +111,7 @@ export async function GET(req: NextRequest) {
 
   // ========== 4. ตรวจวิชาไม่ครบจำนวนคาบ ==========
   for (const group of classGroups) {
-    const groupSchedules = schedules.filter(s => s.classGroupId === group.id);
+    const groupSchedules = schedules.filter(s => belongsTo(s, group.id));
     for (const subject of subjects) {
       const count = groupSchedules.filter(s => s.subjectId === subject.id).length;
       if (count > 0 && count < subject.periodsPerWeek) {
@@ -110,29 +125,27 @@ export async function GET(req: NextRequest) {
   }
 
   // ========== 5. ตรวจวิชาสามัญคู่ไม่ตรงกัน ==========
-  const pairGroups = await prisma.classGroup.findMany({
-    where: { pairKey: { not: null } },
-  });
-  const pairMap = new Map<string, number[]>();
-  for (const g of pairGroups) {
-    if (!pairMap.has(g.pairKey!)) pairMap.set(g.pairKey!, []);
-    pairMap.get(g.pairKey!)!.push(g.id);
+  const pairMap = new Map<string, typeof allGroups>();
+  for (const group of allGroups) {
+    if (!group.pairKey) continue;
+    const key = `${group.year}:${group.pairKey}`;
+    const members = pairMap.get(key) ?? [];
+    members.push(group);
+    pairMap.set(key, members);
   }
-  for (const [pairKey, ids] of pairMap) {
-    if (ids.length < 2) continue;
-    const commonSubjects = subjects.filter(s => s.isCommon);
-    for (const subject of commonSubjects) {
-      const slots0 = schedules.filter(s => s.classGroupId === ids[0] && s.subjectId === subject.id)
-        .map(s => `${s.dayOfWeek}-${s.periodId}`).sort();
-      const slots1 = schedules.filter(s => s.classGroupId === ids[1] && s.subjectId === subject.id)
-        .map(s => `${s.dayOfWeek}-${s.periodId}`).sort();
-      if (slots0.join(",") !== slots1.join(",") && (slots0.length > 0 || slots1.length > 0)) {
-        const g0 = pairGroups.find(g => g.id === ids[0]);
-        const g1 = pairGroups.find(g => g.id === ids[1]);
+  const commonSubjects = subjects.filter(subject => subject.isCommon);
+  for (const members of pairMap.values()) {
+    for (let index = 0; index + 1 < members.length; index += 2) {
+      const [first, second] = members.slice(index, index + 2);
+      if (classGroupId !== undefined && first.id !== classGroupId && second.id !== classGroupId) continue;
+      for (const subject of commonSubjects) {
+        const slotsFor = (id: number) => schedules.filter(s => belongsTo(s, id) && s.subjectId === subject.id)
+          .map(s => `${s.dayOfWeek}-${s.periodId}`).sort().join(",");
+        if (slotsFor(first.id) === slotsFor(second.id)) continue;
         issues.push({
           type: "warning",
-          message: `คู่ "${pairKey}" — วิชาสามัญ "${subject.name}" ไม่ตรงคาบกัน`,
-          detail: `${g0?.name} vs ${g1?.name}`,
+          message: `คู่ "${first.pairKey}" — วิชาสามัญ "${subject.name}" ไม่ตรงคาบกัน`,
+          detail: `${first.name} vs ${second.name}`,
         });
       }
     }
